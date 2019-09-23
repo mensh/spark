@@ -1,0 +1,1177 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using ChartDirector;
+using DevExpress.XtraEditors;
+using SOM.Form.ViewBase;
+
+namespace SOM.Class
+{
+    public class ChartBase
+    {
+        public delegate void _NedCalc(object sender);
+
+        public event _NedCalc NedCalc;
+
+        public delegate void _TimeDiskretAnalizeCalc(object sender, EventArgs e);
+
+        public event _TimeDiskretAnalizeCalc TimeDiskretAnalizeCalc;
+        private BindingList<TimeDiskret.TimeDiskretPoint> listTimeDiskretPoints;
+
+        private readonly WinChartViewer _winChartViewer1;
+        private readonly BindingList<ParametrRZ> _analogGrid;
+        private readonly BindingList<ParametrRZ> _binarGrid;
+        private readonly DevExpress.XtraEditors.HScrollBar _hScrollBar1;
+        private readonly BackgroundWorker _backgroundWorker;
+        private readonly List<int> _trackLinePos = new List<int>();
+        private int _nearestTrackLine = -1;
+        private int _widthViewer, _heightViewer;
+        public readonly CheckBox TrackLine1Enable;
+        int _nearestDistance;
+
+
+        private readonly int _colorsBackground1;
+        private readonly int _colorsBackground2;
+
+        private readonly int _colorsGrid;
+
+        private int _position;
+
+        public delegate void WaitingControl(bool state);
+
+        //   private BindingList<ClassBaseAnalize> listclassBaseAnalizes;
+        private readonly WaitingControl _waitingControl;
+        private readonly CheckBox _enableTextLegend;
+        private bool _hasFinishedInitialization;
+
+        public ChartBase(
+            WinChartViewer winChartViewer,
+            DevExpress.XtraEditors.HScrollBar hScrollBar1, ref DataInterface _useData,
+            CheckBox trackLine1Enable, int widthViewer, int heightViewer, WaitingControl waitingControl,
+            int colorsBackground1, int colorsBackground2, int colorGrid, CheckBox enableTextLegend)
+        {
+            _winChartViewer1 = winChartViewer;
+            _colorsBackground1 = colorsBackground1;
+            _colorsBackground2 = colorsBackground2;
+            _hScrollBar1 = hScrollBar1;
+            _colorsGrid = colorGrid;
+            _waitingControl = waitingControl;
+            _winChartViewer1.MouseMovePlotArea += WinChartViewer1_MouseMovePlotArea;
+            _winChartViewer1.ViewPortChanged += WinChartViewer1_ViewPortChanged;
+            _winChartViewer1.PreviewKeyDown += WinChartViewer1_PreviewKeyDown;
+            _winChartViewer1.MouseClick += WinChartViewer1_MouseClick;
+            _analogGrid = _useData.ActiveAnalog;
+            _binarGrid = _useData.ActiveBinar;
+            //      listclassBaseAnalizes = _useData.listbaseanalize;
+            listTimeDiskretPoints = _useData.TimeDiskret;
+            TrackLine1Enable = trackLine1Enable;
+            _widthViewer = widthViewer;
+            _heightViewer = heightViewer;
+            _enableTextLegend = enableTextLegend;
+            _backgroundWorker = new BackgroundWorker {WorkerSupportsCancellation = true};
+            _backgroundWorker.DoWork += BackgroundWorker_DoWork;
+            _backgroundWorker.RunWorkerCompleted += BackgroundWorker_RunWorkerCompleted;
+            _hScrollBar1.ValueChanged += _hScrollBar1_ValueChanged;
+        }
+
+        private void _hScrollBar1_ValueChanged(object sender, EventArgs e)
+        {
+            if (_hasFinishedInitialization && !_winChartViewer1.IsInViewPortChangedEvent)
+            {
+                // Set the view port based on the scroll bar
+                _winChartViewer1.ViewPortLeft = ((double) (_hScrollBar1.Value - _hScrollBar1.Minimum))
+                                                / (_hScrollBar1.Maximum - _hScrollBar1.Minimum);
+
+                // Trigger a view port changed event to update the chart
+                _winChartViewer1.updateViewPort(true, false);
+            }
+        }
+
+        private void WinChartViewer1_MouseClick(object sender, MouseEventArgs e)
+        {
+            if (TrackLine1Enable.Checked == false)
+            {
+                _position = _winChartViewer1.PlotAreaMouseX;
+                TrackLineLegend((XYChart) _winChartViewer1.Chart, _position);
+                _winChartViewer1.updateDisplay(true);
+            }
+        }
+
+
+        private void WinChartViewer1_PreviewKeyDown(object sender, PreviewKeyDownEventArgs e)
+        {
+            switch (e.KeyCode)
+            {
+                case (Keys.A):
+                {
+                    _winChartViewer1.Select();
+                    _position -= 5;
+                    if (_winChartViewer1.InvokeRequired)
+                    {
+                        _winChartViewer1.Invoke(new MethodInvoker(() =>
+                        {
+                            TrackLineLegend((XYChart) _winChartViewer1.Chart, _position);
+                            _winChartViewer1.updateDisplay(true);
+                        }));
+                    }
+                    else
+                    {
+                        TrackLineLegend((XYChart) _winChartViewer1.Chart, _position);
+                        _winChartViewer1.updateDisplay(true);
+                    }
+
+
+                    break;
+                }
+
+                case Keys.D:
+                {
+                    _position += 5;
+                    _winChartViewer1.Select();
+                    if (_winChartViewer1.InvokeRequired)
+                    {
+                        _winChartViewer1.Invoke(new MethodInvoker(() =>
+                        {
+                            TrackLineLegend((XYChart) _winChartViewer1.Chart, _position);
+                            _winChartViewer1.updateDisplay(true);
+                        }));
+                    }
+                    else
+                    {
+                        TrackLineLegend((XYChart) _winChartViewer1.Chart, _position);
+                        _winChartViewer1.updateDisplay(true);
+                    }
+
+                    break;
+                }
+
+                case Keys.Space:
+                {
+                    break;
+                }
+            }
+        }
+
+        public void PlayTrack()
+        {
+            _position++;
+            TrackLineLegend((XYChart) _winChartViewer1.Chart, _position);
+            _winChartViewer1.updateDisplay(true);
+        }
+
+        public void SetPosition(DateTime positin)
+        {
+            TrackLineLegendDate((XYChart) _winChartViewer1.Chart, positin);
+            _winChartViewer1.updateDisplay(true);
+        }
+
+
+        private void WinChartViewer1_ViewPortChanged(object sender, WinViewPortEventArgs e)
+        {
+            UpdateControls();
+
+            if (e.NeedUpdateChart)
+            {
+                DrawChart();
+            }
+        }
+
+
+        private void UpdateControls()
+        {
+            _hScrollBar1.LargeChange = (int) Math.Ceiling(_winChartViewer1.ViewPortWidth *
+                                                          (_hScrollBar1.Maximum - _hScrollBar1.Minimum));
+            _hScrollBar1.SmallChange = (int) Math.Ceiling(_hScrollBar1.LargeChange * 0.1);
+            _hScrollBar1.Value = (int) Math.Round(_winChartViewer1.ViewPortLeft *
+                                                  (_hScrollBar1.Maximum - _hScrollBar1.Minimum)) + _hScrollBar1.Minimum;
+        }
+
+
+        public void UpdateDraw(int width, int heihgt)
+        {
+            _widthViewer = width;
+            _heightViewer = heihgt;
+            if (_backgroundWorker.IsBusy == false) DrawChart();
+        }
+
+
+        private void WinChartViewer1_MouseMovePlotArea(object sender, MouseEventArgs e)
+        {
+            if (TrackLine1Enable.Checked == false && ((e.Button & MouseButtons.Left) != 0))
+            {
+                WinChartViewer viewer = (WinChartViewer) sender;
+                TrackLineLegend((XYChart) viewer.Chart, viewer.PlotAreaMouseX);
+                viewer.updateDisplay(true);
+            }
+            else if (TrackLine1Enable.Checked)
+            {
+                Muve_plot((WinChartViewer) sender, e);
+            }
+        }
+
+
+
+        public bool Init()
+        {
+            if (!InitChartViewer(_winChartViewer1))
+                return false;
+
+            _winChartViewer1.updateViewPort(true, false);
+            _hasFinishedInitialization = true;
+            return true;
+        }
+
+        private bool InitChartViewer(WinChartViewer viewer)
+        {
+            ParametrRZ temp = null;
+            if (_analogGrid.Count == 0 && _binarGrid.Count == 0)
+            {
+                XtraMessageBox.Show("Нет параметров для отображения");
+                return false;
+            }
+
+            temp = _analogGrid.Count > 0 ? _analogGrid[0] : _binarGrid[0];
+            // Set the full x range to be the duration of the data
+            if (temp != null)
+            {
+                viewer.setFullRange("x", temp.DataPoint.X[0],
+                    temp.DataPoint.X[temp.DataPoint.X.Count - 1]);
+
+                // Initialize the view port to show the latest 20% of the time range
+                viewer.ViewPortWidth = 0.2;
+                viewer.ViewPortLeft = 1 - viewer.ViewPortWidth;
+
+                // Set the maximum zoom to 10 points
+                viewer.ZoomInWidthLimit = 10.0 / temp.DataPoint.X.Count;
+            }
+
+            // Enable mouse wheel zooming by setting the zoom ratio to 1.1 per wheel event
+            viewer.MouseWheelZoomRatio = 1.1;
+            return true;
+        }
+
+        private void DrawChart()
+        {
+            _waitingControl(true);
+            if (_backgroundWorker.IsBusy)
+            {
+                _backgroundWorker.CancelAsync();
+            }
+
+            while (_backgroundWorker.IsBusy)
+            {
+                Thread.Sleep(1);
+                Application.DoEvents();
+            }
+
+            _backgroundWorker.RunWorkerAsync();
+        }
+
+        private void BackgroundWorker_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
+        {
+            if (e.Cancelled) return;
+            if (e.Result == null) return;
+            XYChart c = (XYChart) e.Result;
+            _winChartViewer1.Chart = c;
+
+            if (!_winChartViewer1.IsInMouseMoveEvent)
+            {
+                //TrackLineLegend(c,
+                //    null == _winChartViewer1.Chart ? c.getPlotArea().getRightX() : _winChartViewer1.PlotAreaMouseX);
+                TrackLineLegend(c, _winChartViewer1.PlotAreaMouseX);
+            }
+
+            _waitingControl(false);
+        }
+
+        private void BackgroundWorker_DoWork(object sender, DoWorkEventArgs e)
+        {
+            XYChart c = DrawChartThread(_winChartViewer1, _widthViewer, _heightViewer);
+
+            if (_backgroundWorker.CancellationPending)
+            {
+                e.Cancel = true;
+                e.Result = null;
+            }
+
+            e.Result = c;
+        }
+
+        void BuildBinar(ParametrRZ tempBinar, XYChart c, DateTime viewPortStartDate, DateTime viewPortEndDate)
+        {
+            if (tempBinar != null)
+            {
+                int listStartIndex =
+                    ((int) Math.Floor(Chart.bSearch(tempBinar.DataPoint.X.ToArray(), viewPortStartDate)));
+                int listEndIndex = (
+                    (int) Math.Ceiling(Chart.bSearch(tempBinar.DataPoint.X.ToArray(), viewPortEndDate)));
+                int listNoOfPoints = (listEndIndex - listStartIndex + 1);
+
+
+                DateTime[] listViewPortTimeStamps = ((DateTime[]) Chart.arraySlice(tempBinar.DataPoint.X.ToArray(),
+                    listStartIndex, listNoOfPoints));
+                double[] viewPortDataSeries = (((double[]) Chart.arraySlice(tempBinar.DataPoint.Y.ToArray(),
+                    listStartIndex, listNoOfPoints)));
+
+
+                string[] hexValuesSplit = (tempBinar.Color1).Split('-');
+                int color = Convert.ToInt32(hexValuesSplit[3], 16) << 0 |
+                            Convert.ToInt32(hexValuesSplit[2], 16) << 8 |
+                            Convert.ToInt32(hexValuesSplit[1], 16) << 16 |
+                            Convert.ToInt32(hexValuesSplit[0], 16) << 24;
+
+                lock (c)
+                {
+                    LineLayer layer = (c.addLineLayer2());
+                    Axis rightAxis = c.addAxis(Chart.Right, _offsetAxis * 50);
+                    rightAxis.setIndent(false);
+                    rightAxis.syncAxis(c.yAxis(), 1, tempBinar.ZeroDot);
+                    layer.setFastLineMode(true);
+                    layer.setLineWidth((int) tempBinar.PriceDot);
+                    if (tempBinar.ShowAxis)
+                    {
+                        rightAxis.setColors(color, color, color);
+                        rightAxis.setTitle(tempBinar.FullName, "Arial Bold Italic", 8);
+                        rightAxis.setTitlePos(Chart.Right, 1);
+                    }
+                    else rightAxis.setColors(Chart.Transparent, Chart.Transparent, Chart.Transparent);
+
+                    layer.setXData(listViewPortTimeStamps);
+                    layer.addDataSet(viewPortDataSeries, color, Convert.ToString(tempBinar.Tag));
+                    layer.setUseYAxis(rightAxis);
+                }
+            }
+        }
+
+
+        void BuildAnalog(ParametrRZ tempAnalog, XYChart c, int offsetAxis, DateTime viewPortStartDate,
+            DateTime viewPortEndDate)
+        {
+            if (tempAnalog != null)
+            {
+                int listStartIndex = (
+                    (int) Math.Floor(Chart.bSearch(tempAnalog.DataPoint.X.ToArray(), viewPortStartDate)));
+                int listEndIndex = (
+                    (int) Math.Ceiling(Chart.bSearch(tempAnalog.DataPoint.X.ToArray(), viewPortEndDate)));
+                int listNoOfPoints = (listEndIndex - listStartIndex + 1);
+
+
+                DateTime[] listViewPortTimeStamps = ((DateTime[]) Chart.arraySlice(tempAnalog.DataPoint.X.ToArray(),
+                    listStartIndex, listNoOfPoints));
+                double[] viewPortDataSeries = (((double[]) Chart.arraySlice(tempAnalog.DataPoint.Y.ToArray(),
+                    listStartIndex, listNoOfPoints)));
+
+                string[] hexValuesSplit = (tempAnalog.Color1).Split('-');
+                int color = Convert.ToInt32(hexValuesSplit[3], 16) << 0 |
+                            Convert.ToInt32(hexValuesSplit[2], 16) << 8 |
+                            Convert.ToInt32(hexValuesSplit[1], 16) << 16 |
+                            Convert.ToInt32(hexValuesSplit[0], 16) << 24;
+
+                lock (c)
+                {
+                    LineLayer layer = (c.addLineLayer2());
+                    Axis rightAxis = c.addAxis(Chart.Right, offsetAxis * 50);
+                    rightAxis.setIndent(false);
+                    rightAxis.syncAxis(c.yAxis(), tempAnalog.PriceDot, tempAnalog.ZeroDot);
+                    layer.setFastLineMode(true);
+                    layer.setLineWidth(2);
+                    if (tempAnalog.ShowAxis)
+                    {
+                        rightAxis.setColors(color, color, color);
+                        rightAxis.setTitle(tempAnalog.FullName, "Arial Bold Italic", 8);
+                        rightAxis.setTitlePos(Chart.Right, 1);
+                    }
+                    else rightAxis.setColors(Chart.Transparent, Chart.Transparent, Chart.Transparent);
+
+                    layer.setXData(listViewPortTimeStamps);
+                    layer.addDataSet(viewPortDataSeries, color, Convert.ToString(tempAnalog.Tag));
+                    layer.setUseYAxis(rightAxis);
+                }
+            }
+        }
+
+        private int _offsetAxis = 0;
+
+        private XYChart DrawChartThread(WinChartViewer viewer, int width, int height)
+        {
+            try
+            {
+                Stopwatch stopwatch = new Stopwatch();
+
+
+                int coun = 0;
+                if (_analogGrid != null)
+                {
+                    foreach (ParametrRZ t in _analogGrid)
+                    {
+                        if (t.ShowAxis)
+                        {
+                            coun++;
+                        }
+                    }
+                }
+
+                // Begin timing.
+                stopwatch.Start();
+                //var viewer = (WinChartViewer) e.Argument;
+                XYChart c = new XYChart(width, height - 30, (_colorsBackground1 & 0x00ffffff));
+                // _winChartViewer1.Chart.
+                c.setPlotArea(5, 5, c.getWidth() - coun * 50, c.getHeight() - 30, c.linearGradientColor(0, 55, 0,
+                        c.getHeight() - 35, _colorsBackground1 & 0x00ffffff, _colorsBackground2 & 0x00ffffff), -1,
+                    _colorsGrid & 0x00ffffff, _colorsGrid & 0x00ffffff, _colorsGrid & 0x00ffffff);
+
+                // As the data can lie outside the plotarea in a zoomed chart, we need enable clipping.
+                c.setClipping();
+
+                // Set the x and y axis stems to transparent and the label font to 10pt Arial
+                c.xAxis().setColors(Chart.Transparent);
+                c.yAxis().setColors(0x008000);
+                c.xAxis().setLabelStyle("Arial", 10);
+                c.yAxis().setLabelStyle("Arial", 10);
+                // Set the x-axis as a date/time axis with the scale according to the view port x range.
+                viewer.syncDateAxisWithViewPort("x", c.xAxis());
+
+                // For the automatic y-axis labels, set the minimum spacing to 30 pixels.
+                //   c.yAxis().setTickDensity(30);
+                c.yAxis().setLinearScale(0, 100, 10);
+                c.yAxis().setColors(Chart.Transparent, Chart.Transparent);
+                c.xAxis().setFormatCondition("true");
+                c.xAxis().setMultiFormat(Chart.StartOfDayFilter(), "<*font=bold*>{value|hh:nn.ss<*br*>hh.nn.ss.ff}",
+                    Chart.AllPassFilter(), "{value|hh:nn:ss.ff}");
+
+                //================================================================================
+                // Add data to chart
+                //================================================================================
+
+
+                DateTime viewPortStartDate = Chart.NTime(viewer.getValueAtViewPort("x", viewer.ViewPortLeft));
+                DateTime viewPortEndDate =
+                    Chart.NTime(viewer.getValueAtViewPort("x", viewer.ViewPortLeft + viewer.ViewPortWidth));
+                var watch = new Stopwatch();
+                watch.Start();
+                //   int index = 0;
+
+                if (_backgroundWorker.CancellationPending)
+                {
+                    return null;
+                }
+
+                _analogGrid?.AsParallel()
+                    .ForAll(t1 => BuildAnalog(t1, c, _offsetAxis, viewPortStartDate, viewPortEndDate));
+                _binarGrid?.AsParallel().ForAll(t1 => BuildBinar(t1, c, viewPortStartDate, viewPortEndDate));
+                if (TrackLine1Enable.Checked) trackLineLabel_measur(c);
+                return c;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+                return null;
+            }
+        }
+
+        private void TrackLineLegendDate(XYChart c, DateTime xValueD)
+        {
+            // Clear the current dynamic layer and get the DrawArea object to draw on it.
+            double xValue = Chart.CTime(xValueD);
+
+            DrawArea d = c.initDynamicLayer();
+
+
+            // The plot area object
+            PlotArea plotArea = c.getPlotArea();
+
+            // Get the data x-value that is nearest to the mouse, and find its pixel coordinate.
+            // double xValue = c.getNearestXValue(mouseX);
+            int xCoor = c.getXCoor(xValue);
+
+            // Draw a vertical track line at the x-position
+            d.vline(plotArea.getTopY(), plotArea.getBottomY(), xCoor, 0xff0000);
+
+            // Container to hold the legend entries
+            //     var arrayList = new ArrayList();
+
+            // Draw a label on the x-axis to show the track line position.
+            string xlabel = "<*font,bgColor=000000*> " + c.xAxis().getFormattedLabel(xValue, "hh.nn.ss.ff") +
+                            " <*/font*>";
+            TTFText t1 = d.text(xlabel, "Arial Bold", 8);
+
+            // Restrict the x-pixel position of the label to make sure it stays inside the chart image.
+            int xLabelPos = Math.Max(0, Math.Min(xCoor - t1.getWidth() / 2, c.getWidth() - t1.getWidth()));
+            t1.draw(xLabelPos, plotArea.getBottomY() + 6, 0xffffff);
+
+
+            // Iterate through all layers to build the legend array
+            for (int i = 0; i < c.getLayerCount(); ++i)
+            {
+                Layer layerByZ = c.getLayerByZ(i);
+
+                // The data array index of the x-value
+                int xIndex = layerByZ.getXIndexOf(xValue, 10);
+
+                // Iterate through all the data sets in the layer
+                for (int j = 0; j < layerByZ.getDataSetCount(); ++j)
+                {
+                    var dataSet = layerByZ.getDataSetByZ(j);
+
+                    // We are only interested in visible data sets with names
+                    string dataName = dataSet.getDataName();
+                    int color = dataSet.getDataColor();
+                    if ((!string.IsNullOrEmpty(dataName)))
+                    {
+                        // BuildAnalog the legend entry, consist of the legend icon, name and data value.
+                        double dataValue = dataSet.getValue(xIndex);
+                        //legendEntries.Add("<*block*>" + dataSet.getLegendIcon() + " " + dataName + ": " + ((
+                        //    Math.Abs(dataValue - Chart.NoValue) < TOLERANCE) ? "N/A" : c.formatValue(dataValue, "{value|P4}")) +
+                        //    "<*/*>");
+
+                        foreach (var gridViewRowInfo in _analogGrid)
+                        {
+                            try
+                            {
+                                ParametrRZ t = gridViewRowInfo;
+                                if (Convert.ToString(t.Tag) == dataName)
+                                {
+                                    t.Fizika = (dataValue);
+
+                                    //    t.Code = t.Point.Code[xCoor];
+
+
+                                    // Draw a track dot for data points within the plot area
+                                    int yCoor = c.getYCoor(dataSet.getPosition(xIndex), dataSet.getUseYAxis());
+
+                                    // Draw a track dot with a label next to it for visible data points in the plot area
+                                    if ((yCoor >= plotArea.getTopY()) && (yCoor <= plotArea.getBottomY()) &&
+                                        (color !=
+                                         Chart
+                                             .Transparent
+                                        ) && (!string.IsNullOrEmpty(dataSet.getDataName())))
+                                    {
+                                        d.circle(xCoor, yCoor, 4, 4, color, color);
+
+                                        if (_enableTextLegend.Checked)
+                                        {
+                                            string label =
+                                                "<*font,bgColor=" + color.ToString("x") + "*> " + t.FullName + "=" +
+                                                c.formatValue(
+                                                    Math.Round(t.Fizika, t.CountDigit), "{value|P4}") +
+                                                " <*/font*>";
+                                            t1 = d.text(label, "Arial Bold", 8);
+
+                                            // Draw the label on the right side of the dot if the mouse is on the left side the
+                                            // chart, and vice versa. This ensures the label will not go outside the chart image.
+                                            if (xCoor <= (plotArea.getLeftX() + plotArea.getRightX()) / 2)
+                                            {
+                                                t1.draw(xCoor + 5, yCoor, 0xffffff, Chart.Left);
+                                            }
+                                            else
+                                            {
+                                                t1.draw(xCoor - 5, yCoor, 0xffffff, Chart.Right);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            catch
+                            {
+                                // ignored
+                            }
+                        }
+
+                        foreach (var gridViewRowInfo in _binarGrid)
+                        {
+                            try
+                            {
+                                ParametrRZ t = gridViewRowInfo;
+                                if (Convert.ToString(t.Tag) == dataName)
+                                {
+                                    t.Fizika = dataValue;
+                                    int yCoor = c.getYCoor(dataSet.getPosition(xIndex), dataSet.getUseYAxis());
+
+                                    // Draw a track dot with a label next to it for visible data points in the plot area
+                                    if ((yCoor >= plotArea.getTopY()) && (yCoor <= plotArea.getBottomY()) &&
+                                        /* (Math.Abs(dataValue - t.ZeroDot) > TOLERANCE) &&*/
+                                        (!string.IsNullOrEmpty(dataSet.getDataName())))
+                                    {
+                                        string[] hexValuesSplit = t.Color1.Split('-');
+                                        int colors = Convert.ToInt32(hexValuesSplit[3], 16) << 0 |
+                                                     Convert.ToInt32(hexValuesSplit[2], 16) << 8 |
+                                                     Convert.ToInt32(hexValuesSplit[1], 16) << 16 |
+                                                     Convert.ToInt32(hexValuesSplit[0], 16) << 24;
+
+                                        d.circle(xCoor, yCoor, 4, 4, colors, colors);
+                                        if (_enableTextLegend.Checked)
+                                        {
+                                            string label =
+                                                "<*font,bgColor=" + colors.ToString("x") + "*> " + t.FullName +
+                                                "=" + c.formatValue(
+                                                    t.Fizika, "{value|P4}") + " <*/font*>";
+                                            t1 = d.text(label, "Arial Bold", 8);
+
+                                            // Draw the label on the right side of the dot if the mouse is on the left side the
+                                            // chart, and vice versa. This ensures the label will not go outside the chart image.
+                                            if (xCoor <= (plotArea.getLeftX() + plotArea.getRightX()) / 2)
+                                            {
+                                                t1.draw(xCoor + 5, yCoor, 0xffffff, Chart.Left);
+                                            }
+                                            else
+                                            {
+                                                t1.draw(xCoor - 5, yCoor, 0xffffff, Chart.Right);
+                                            }
+
+                                            //EnableTextLegend = false;
+                                        }
+                                    }
+                                }
+                            }
+                            catch
+                            {
+                                // ignored
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+
+        private void TrackLineLegend(XYChart c, int mouseX)
+        {
+            // Clear the current dynamic layer and get the DrawArea object to draw on it.
+
+
+            DrawArea d = c.initDynamicLayer();
+
+
+            // The plot area object
+            PlotArea plotArea = c.getPlotArea();
+
+            // Get the data x-value that is nearest to the mouse, and find its pixel coordinate.
+            double xValue = c.getNearestXValue(mouseX);
+            int xCoor = c.getXCoor(xValue);
+
+            // Draw a vertical track line at the x-position
+            d.vline(plotArea.getTopY(), plotArea.getBottomY(), xCoor, 0xff0000);
+
+            // Container to hold the legend entries
+            //     var arrayList = new ArrayList();
+
+            // Draw a label on the x-axis to show the track line position.
+            string xlabel = "<*font,bgColor=000000*> " + c.xAxis().getFormattedLabel(xValue, "hh.nn.ss.ff") +
+                            " <*/font*>";
+            TTFText t1 = d.text(xlabel, "Arial Bold", 8);
+
+            // Restrict the x-pixel position of the label to make sure it stays inside the chart image.
+            int xLabelPos = Math.Max(0, Math.Min(xCoor - t1.getWidth() / 2, c.getWidth() - t1.getWidth()));
+            t1.draw(xLabelPos, plotArea.getBottomY() + 6, 0xffffff);
+
+
+            // Iterate through all layers to build the legend array
+            for (int i = 0; i < c.getLayerCount(); ++i)
+            {
+                Layer layerByZ = c.getLayerByZ(i);
+
+                // The data array index of the x-value
+                int xIndex = layerByZ.getXIndexOf(xValue, 10);
+
+                // Iterate through all the data sets in the layer
+                for (int j = 0; j < layerByZ.getDataSetCount(); ++j)
+                {
+                    var dataSet = layerByZ.getDataSetByZ(j);
+
+                    // We are only interested in visible data sets with names
+                    string dataName = dataSet.getDataName();
+                    int color = dataSet.getDataColor();
+                    if ((!string.IsNullOrEmpty(dataName)))
+                    {
+                        // BuildAnalog the legend entry, consist of the legend icon, name and data value.
+                        double dataValue = dataSet.getValue(xIndex);
+
+                        foreach (var gridViewRowInfo in _analogGrid)
+                        {
+                            try
+                            {
+                                ParametrRZ t = gridViewRowInfo;
+                                if (Convert.ToString(t.Tag) == dataName)
+                                {
+                                    t.Fizika = (dataValue);
+                                    // Draw a track dot for data points within the plot area
+                                    int yCoor = c.getYCoor(dataSet.getPosition(xIndex), dataSet.getUseYAxis());
+
+                                    // Draw a track dot with a label next to it for visible data points in the plot area
+                                    if ((yCoor >= plotArea.getTopY()) && (yCoor <= plotArea.getBottomY()) &&
+                                        (color !=
+                                         Chart
+                                             .Transparent
+                                        ) && (!string.IsNullOrEmpty(dataSet.getDataName())))
+                                    {
+                                        d.circle(xCoor, yCoor, 4, 4, color, color);
+
+                                        if (_enableTextLegend.Checked)
+                                        {
+                                            string label =
+                                                "<*font,bgColor=" + color.ToString("x") + "*> " + t.FullName + "=" +
+                                                c.formatValue(
+                                                    Math.Round(t.Fizika, t.CountDigit), "{value|P4}") +
+                                                " <*/font*>";
+                                            t1 = d.text(label, "Arial Bold", 8);
+
+                                            // Draw the label on the right side of the dot if the mouse is on the left side the
+                                            // chart, and vice versa. This ensures the label will not go outside the chart image.
+                                            if (xCoor <= (plotArea.getLeftX() + plotArea.getRightX()) / 2)
+                                            {
+                                                t1.draw(xCoor + 5, yCoor, 0xffffff, Chart.Left);
+                                            }
+                                            else
+                                            {
+                                                t1.draw(xCoor - 5, yCoor, 0xffffff, Chart.Right);
+                                            }
+
+                                            //EnableTextLegend = false;
+                                        }
+                                    }
+                                }
+                            }
+                            catch
+                            {
+                                // ignored
+                            }
+                        }
+
+                        foreach (var gridViewRowInfo in _binarGrid)
+                        {
+                            try
+                            {
+                                ParametrRZ t = gridViewRowInfo;
+                                if (Convert.ToString(t.Tag) == dataName)
+                                {
+                                    t.Fizika = dataValue;
+                                    int yCoor = c.getYCoor(dataSet.getPosition(xIndex), dataSet.getUseYAxis());
+
+                                    // Draw a track dot with a label next to it for visible data points in the plot area
+                                    if ((yCoor >= plotArea.getTopY()) && (yCoor <= plotArea.getBottomY()) &&
+                                        /* (Math.Abs(dataValue - t.ZeroDot) > TOLERANCE) &&*/
+                                        (!string.IsNullOrEmpty(dataSet.getDataName())))
+                                    {
+                                        string[] hexValuesSplit = t.Color1.Split('-');
+                                        int colors = Convert.ToInt32(hexValuesSplit[3], 16) << 0 |
+                                                     Convert.ToInt32(hexValuesSplit[2], 16) << 8 |
+                                                     Convert.ToInt32(hexValuesSplit[1], 16) << 16 |
+                                                     Convert.ToInt32(hexValuesSplit[0], 16) << 24;
+
+                                        d.circle(xCoor, yCoor, 4, 4, colors, colors);
+                                        if (_enableTextLegend.Checked)
+                                        {
+                                            string label =
+                                                "<*font,bgColor=" + colors.ToString("x") + "*> " + t.FullName +
+                                                "=" + c.formatValue(
+                                                    t.Fizika, "{value|P4}") + " <*/font*>";
+                                            t1 = d.text(label, "Arial Bold", 8);
+
+                                            // Draw the label on the right side of the dot if the mouse is on the left side the
+                                            // chart, and vice versa. This ensures the label will not go outside the chart image.
+                                            if (xCoor <= (plotArea.getLeftX() + plotArea.getRightX()) / 2)
+                                            {
+                                                t1.draw(xCoor + 5, yCoor, 0xffffff, Chart.Left);
+                                            }
+                                            else
+                                            {
+                                                t1.draw(xCoor - 5, yCoor, 0xffffff, Chart.Right);
+                                            }
+
+                                            //EnableTextLegend = false;
+                                        }
+                                    }
+                                }
+                            }
+                            catch
+                            {
+                                // ignored
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        private void trackLineLabel_measur(XYChart c)
+        {
+            // Clear the current dynamic layer and get the DrawArea object to draw on it.
+            c.initDynamicLayer();
+
+            // In this example, we have two track lines.
+            const int trackLineCount = 2;
+
+            if (_trackLinePos.Count == 0)
+            {
+                // Initialize the track line position by distributing them on the plot area
+                PlotArea p = c.getPlotArea();
+                for (int i = 0; i < trackLineCount; ++i)
+                    _trackLinePos.Add(p.getLeftX() + (int) (p.getWidth() * (i + 0.5) / trackLineCount));
+            }
+
+            // Record the positions with the track lines
+            var trackLineLog = new Dictionary<string, double>[trackLineCount];
+
+            // Draw the track lines if enabled
+            if (TrackLine1Enable.Checked)
+            {
+                DrawTrackLine(c, _trackLinePos[0], trackLineLog[0] = new Dictionary<string, double>());
+                DrawTrackLine(c, _trackLinePos[1], trackLineLog[1] = new Dictionary<string, double>());
+            }
+
+            // Draw the differences beteween the first two track lines
+            DrawTrackDiff(c, trackLineLog[0], trackLineLog[1]);
+        }
+
+        void DrawTrackDiff(XYChart c, Dictionary<string, double> log0, Dictionary<string, double> log1)
+        {
+            if (!((null != log0) && log0.TryGetValue("x", out var x0) && (null != log1) &&
+                  log1.TryGetValue("x", out var x1)))
+                return;
+
+            listTimeDiskretPoints.Clear();
+            // Two columns in the table
+            var leftCol = new StringBuilder();
+            var rightCol = new StringBuilder();
+            double z1 = 0, z2 = 0;
+            leftCol.Append("Change in x: ");
+            rightCol.Append(c.formatValue(x1 - x0, "{value|2}"));
+
+            // Iterate through all layers to draw the data labels
+            for (int i = 0; i < c.getLayerCount(); ++i)
+            {
+                Layer layer = c.getLayerByZ(i);
+
+                // Iterate through all the data sets in the layer
+                for (int j = 0; j < layer.getDataSetCount(); ++j)
+                {
+                    var dataSetName = layer.getDataSet(j).getDataName();
+
+                    if (!(log0.TryGetValue(dataSetName, out var v0) && log1.TryGetValue(dataSetName, out var v1)))
+                        continue;
+
+
+                    //leftCol.Append("\nChange in ").Append(dataSetName).Append(": ");
+
+                    foreach (var gridViewRowInfo in _analogGrid)
+                    {
+                        ParametrRZ t1 = gridViewRowInfo;
+                        if (Convert.ToString(t1.Tag) == dataSetName)
+                        {
+                            leftCol.Append("\nChange in ").Append(t1.FullName).Append(": ");
+
+                            //if (analogAnalizeEnable)
+                            //{
+                            //    var d = Chart.NTime(x0);
+                            //    int listStartIndex = ((int) Math.Floor(Chart.bSearch(
+                            //        gridViewRowInfo.DataPoint.X.ToArray(),
+                            //        Chart.NTime(x0))));
+                            //    int listEndIndex = ((int) Math.Ceiling(Chart.bSearch(
+                            //        gridViewRowInfo.DataPoint.X.ToArray(),
+                            //        Chart.NTime(x1))));
+                            //    int listNoOfPoints = (listEndIndex - listStartIndex + 1);
+
+                            //    DateTime[] listViewPortTimeStamps = ((DateTime[]) Chart.arraySlice(
+                            //        gridViewRowInfo.DataPoint.X.ToArray(),
+                            //        listStartIndex, listNoOfPoints));
+                            //    double[] viewPortDataSeries = (((double[]) Chart.arraySlice(
+                            //        gridViewRowInfo.DataPoint.Y.ToArray(),
+                            //        listStartIndex, listNoOfPoints)));
+                            //    //ClassBaseAnalize classBaseAnalize = new ClassBaseAnalize();
+                            //    //classBaseAnalize.dateTimes = listViewPortTimeStamps;
+                            //    //classBaseAnalize.Ypoint = viewPortDataSeries;
+                            //    //classBaseAnalize.Name = t1.FullName;
+                            //    //classBaseAnalize.PointA = v0;
+                            //    //classBaseAnalize.PointB = v1;
+                            //    //classBaseAnalize.Time = x0 - x1;
+                            //    //listclassBaseAnalizes.Add(classBaseAnalize);
+                            //}
+
+                            z1 = v0; //(v0 - Convert.ToDouble(t1.Cells["Положение графика (0–100%)"].Value)) / Convert.ToDouble(t1.Cells["Масштаб графика (знач./1%)"].Value);
+                            z2 = v1; //(v1 - Convert.ToDouble(t1.Cells["Положение графика (0–100%)"].Value)) / Convert.ToDouble(t1.Cells["Масштаб графика (знач./1%)"].Value);
+
+                            if (TimeDiskretAnaliseEnable)
+                            {
+                                TimeDiskret.TimeDiskretPoint timediskretpoint = new TimeDiskret.TimeDiskretPoint();
+                                int listStartIndex = ((int)Math.Floor(Chart.bSearch(
+                                    gridViewRowInfo.DataPoint.X.ToArray(),
+                                    Chart.NTime(x0))));
+                                int listEndIndex = ((int)Math.Ceiling(Chart.bSearch(
+                                    gridViewRowInfo.DataPoint.X.ToArray(),
+                                    Chart.NTime(x1))));
+                                int listNoOfPoints = (listEndIndex - listStartIndex + 1);
+
+                                DateTime[] listViewPortTimeStamps = ((DateTime[])Chart.arraySlice(
+                                    gridViewRowInfo.DataPoint.X.ToArray(),
+                                    listStartIndex, listNoOfPoints));
+                                double[] viewPortDataSeries = (((double[])Chart.arraySlice(
+                                    gridViewRowInfo.DataPoint.Y.ToArray(),
+                                    listStartIndex, listNoOfPoints)));
+                                timediskretpoint.Type = 0;
+                                timediskretpoint.Ypoint = viewPortDataSeries;
+                                timediskretpoint.dateTimes = listViewPortTimeStamps;
+                                timediskretpoint.Name = t1.FullName;
+                                listTimeDiskretPoints.Add(timediskretpoint);
+                            }
+                        }
+                    }
+
+                    NedCalc?.Invoke(this);
+
+
+                    foreach (var gridViewRowInfo in _binarGrid)
+                    {
+                        ParametrRZ t1 = gridViewRowInfo;
+                        if (Convert.ToString(t1.Tag) == dataSetName)
+                        {
+                            leftCol.Append("\nChange in ").Append(t1.FullName).Append(": ");
+                            if (v0 > 0 && !double.IsPositiveInfinity(v0)) z1 = 1;
+                            else z1 = 0;
+
+                            if (v1 > 0 && !double.IsPositiveInfinity(v1)) z2 = 1;
+                            else z2 = 0;
+
+                            if (TimeDiskretAnaliseEnable)
+                            {
+                                int listStartIndex =
+                                    ((int) Math.Floor(Chart.bSearch(gridViewRowInfo.DataPoint.X.ToArray(),
+                                        Chart.NTime(x0))));
+                                int listEndIndex =
+                                    ((int) Math.Ceiling(Chart.bSearch(gridViewRowInfo.DataPoint.X.ToArray(),
+                                        Chart.NTime(x1))));
+                                int listNoOfPoints = (listEndIndex - listStartIndex + 1);
+
+                                DateTime[] listViewPortTimeStamps = ((DateTime[]) Chart.arraySlice(
+                                    gridViewRowInfo.DataPoint.X.ToArray(),
+                                    listStartIndex, listNoOfPoints));
+                                double[] viewPortDataSeries = (((double[]) Chart.arraySlice(
+                                    gridViewRowInfo.DataPoint.Y.ToArray(),
+                                    listStartIndex, listNoOfPoints)));
+
+                                TimeDiskret.TimeDiskretPoint timediskretpoint = new TimeDiskret.TimeDiskretPoint();
+                                timediskretpoint.Type = 3;
+
+                                timediskretpoint.Ypoint = viewPortDataSeries;
+                                timediskretpoint.dateTimes = listViewPortTimeStamps;
+                                timediskretpoint.Name = t1.FullName;
+                                listTimeDiskretPoints.Add(timediskretpoint);
+                            }
+                        }
+                    }
+
+                    if (TimeDiskretAnaliseEnable)
+                    {
+                        TimeDiskretAnalizeCalc?.Invoke(this, EventArgs.Empty);
+                    }
+
+                    rightCol.Append("\n").Append(c.formatValue(z2 - z1, "{value|2}"));
+                }
+            }
+
+            string table = "<*block,bgColor=80ffffff,margin=4*><*block*>" + leftCol +
+                           "<*/*><*block,halign=right*>" + rightCol + "<*/*><*/*>";
+
+            TTFText t = c.getDrawArea().text(table, "Arial", 10);
+            t.draw(c.getPlotArea().getRightX() - t.getWidth(), c.getPlotArea().getTopY(), 0x000000);
+        }
+
+        void DrawTrackLine(XYChart c, int lineX, Dictionary<string, double> log)
+        {
+            // The drawarea and plotarea objects
+            DrawArea d = c.getDrawArea();
+            PlotArea plotArea = c.getPlotArea();
+
+            // Get the data x-value that is nearest to the mouse, and find its pixel coordinate.
+            double xValue = c.getNearestXValue(lineX);
+            int xCoor = c.getXCoor(xValue);
+
+            // Draw empty track line if it is ahead of the data
+            if (((xCoor < lineX) && (xValue >= 0)))
+            {
+                d.vline(plotArea.getTopY(), plotArea.getBottomY(), lineX, 0xff0000);
+                return;
+            }
+
+            // Draw a vertical track line at the x-position
+            d.vline(plotArea.getTopY(), plotArea.getBottomY(), xCoor, 0xff0000);
+
+            // Draw a label on the x-axis to show the track line position.
+            string xlabel = "<*font,bgColor=000000*> " + c.xAxis().getFormattedLabel(xValue, "hh:nn:ss.ff") +
+                            " <*/font*>";
+            TTFText t = d.text(xlabel, "Arial Bold", 10);
+            log["x"] = xValue;
+
+            // Restrict the x-pixel position of the label to make sure it stays inside the chart image.
+            int xLabelPos = Math.Max(0, Math.Min(xCoor - t.getWidth() / 2, c.getWidth() - t.getWidth()));
+            t.draw(xLabelPos, plotArea.getBottomY() + 6, 0xffffff);
+
+            // Iterate through all layers to draw the data labels
+            for (int i = 0; i < c.getLayerCount(); ++i)
+            {
+                Layer layerByZ = c.getLayerByZ(i);
+
+                // The data array index of the x-value
+                int xIndex = layerByZ.getXIndexOf(xValue, 10);
+
+                // Iterate through all the data sets in the layer
+                for (int j = 0; j < layerByZ.getDataSetCount(); ++j)
+                {
+                    var dataSet = layerByZ.getDataSetByZ(j);
+
+                    // Get the color and position of the data label
+                    int color = dataSet.getDataColor();
+                    int yCoor = c.getYCoor(dataSet.getPosition(xIndex), dataSet.getUseYAxis());
+
+                    // Draw a track dot with a label next to it for visible data points in the plot area
+                    if ((yCoor >= plotArea.getTopY()) && (yCoor <= plotArea.getBottomY()) && (color !=
+                                                                                              Chart.Transparent) &&
+                        (!string.IsNullOrEmpty(dataSet.getDataName())))
+                    {
+                        d.circle(xCoor, yCoor, 4, 4, color, color);
+
+
+                        double v0 = 0;
+                        foreach (var gridViewRowInfo in _analogGrid)
+                        {
+                            try
+                            {
+                                ParametrRZ t1 = gridViewRowInfo;
+                                if (Convert.ToString(t1.Tag) == dataSet.getDataName())
+                                {
+                                    v0 = dataSet.getValue(xIndex);
+                                }
+                            }
+                            catch
+                            {
+                                // ignored
+                            }
+                        }
+
+                        foreach (var gridViewRowInfo in _binarGrid)
+                        {
+                            ParametrRZ t1 = gridViewRowInfo;
+                            if (Convert.ToString(t1.Tag) == dataSet.getDataName())
+                            {
+                                if (dataSet.getValue(xIndex) > 0 &&
+                                    !double.IsPositiveInfinity(dataSet.getValue(xIndex))) v0 = 1;
+                                else v0 = 0;
+                            }
+                        }
+
+
+                        string label = "<*font,bgColor=" + color.ToString("x") + "*> " + c.formatValue(
+                                           v0, "{value|P4}") + " <*/font*>";
+                        t = d.text(label, "Arial Bold", 10);
+                        log[dataSet.getDataName()] = v0;
+
+                        // Draw the label on the right side of the dot if the mouse is on the left side the
+                        // chart, and vice versa. This ensures the label will not go outside the chart image.
+                        if (xCoor <= (plotArea.getLeftX() + plotArea.getRightX()) / 2)
+                            t.draw(xCoor + 5, yCoor, 0xffffff, Chart.Left);
+                        else
+                            t.draw(xCoor - 5, yCoor, 0xffffff, Chart.Right);
+                    }
+                }
+            }
+        }
+
+        private void Muve_plot(WinChartViewer viewer, MouseEventArgs e)
+        {
+            // Mouse can drag the track lines if it is in scroll mode
+            var mouseUsage = viewer.MouseUsage;
+            if (((mouseUsage != WinChartMouseUsage.ScrollOnDrag) && (mouseUsage != WinChartMouseUsage.Default))
+                || (_trackLinePos.Count == 0))
+                return;
+
+            int mouseX = viewer.ChartMouseX;
+
+            // Check if mouse button is down
+            if ((e.Button & MouseButtons.Left) != 0)
+            {
+                // If mouse is near track line, then it is dragging the track line
+                if (_nearestTrackLine >= 0)
+                {
+                    XYChart c = (XYChart) viewer.Chart;
+                    PlotArea p = c.getPlotArea();
+
+                    // move the track line while ensuring the track line is in the plot area
+                    _trackLinePos[_nearestTrackLine] =
+                        Math.Min(p.getRightX(), Math.Max(p.getLeftX(), mouseX - _nearestDistance));
+
+                    // repaint the track lines
+                    trackLineLabel_measur(c);
+                    viewer.updateDisplay();
+                }
+            }
+            else
+            {
+                // Check which track line is nearest to the mouse
+                _nearestTrackLine = -1;
+                _nearestDistance = 9;
+                for (int i = 0; i < _trackLinePos.Count; ++i)
+                {
+                    if (Math.Abs(mouseX - _trackLinePos[i]) < Math.Abs(_nearestDistance))
+                    {
+                        _nearestTrackLine = i;
+                        _nearestDistance = mouseX - _trackLinePos[i];
+                    }
+                }
+
+                // If mouse is near the track line, it is used to drag the line, so disable drag to scroll.
+                viewer.MouseUsage = ((_nearestTrackLine >= 0)
+                    ? WinChartMouseUsage.Default
+                    : WinChartMouseUsage.ScrollOnDrag);
+            }
+        }
+
+        #region IDisposable Support
+
+        private bool _disposedValue = false; // Для определения избыточных вызовов
+
+        public bool TimeDiskretAnaliseEnable { get; set; }
+        public bool analogAnalizeEnable { get; set; }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_disposedValue)
+            {
+                if (disposing)
+                {
+                    _backgroundWorker.Dispose();
+                    // TODO: освободить управляемое состояние (управляемые объекты).
+                }
+
+                // TODO: освободить неуправляемые ресурсы (неуправляемые объекты) и переопределить ниже метод завершения.
+                // TODO: задать большим полям значение NULL.
+
+                _disposedValue = true;
+            }
+        }
+
+        // TODO: переопределить метод завершения, только если Dispose(bool disposing) выше включает код для освобождения неуправляемых ресурсов.
+        // ~CsChartBase()
+        // {
+        //   // Не изменяйте этот код. Разместите код очистки выше, в методе Dispose(bool disposing).
+        //   Dispose(false);
+        // }
+
+        // Этот код добавлен для правильной реализации шаблона высвобождаемого класса.
+        public void Dispose()
+        {
+            // Не изменяйте этот код. Разместите код очистки выше, в методе Dispose(bool disposing).
+            Dispose(true);
+            // TODO: раскомментировать следующую строку, если метод завершения переопределен выше.
+            // GC.SuppressFinalize(this);
+        }
+
+        #endregion
+    }
+}
+
